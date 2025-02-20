@@ -1,0 +1,120 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Creates a VPC with a public subnet and an internet gateway
+
+
+Parameters:
+  AvailabilityZone:
+    Type: String
+    Default: ap-northeast-1a # ここら辺はご自身の作業環境に合わせてください
+
+  VPCCIDRBlock:
+    Type: String
+    Default: 10.0.0.0/24
+
+  PublicSubnetCIDRBlock:
+    Type: String
+    Default: 10.0.0.0/27
+
+  SgCIDRBlock:
+    Type: String
+    Default: 10.1.2.0/27
+
+  SgIpv6CIDRBlock:
+    Type: String
+    Default: 2600:1f18:67d:1300::/56
+
+
+Resources:
+  MyVpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VPCCIDRBlock
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: public-vpc-demo
+
+  # IPv6 アドレスの取得
+  Ipv6Pool:
+    Type: AWS::EC2::VPCCidrBlock
+    Properties:
+      AmazonProvidedIpv6CidrBlock: true
+      VpcId: !Ref MyVpc
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyVpc
+      CidrBlock: !Ref PublicSubnetCIDRBlock
+      AvailabilityZone: !Ref AvailabilityZone
+      AssignIpv6AddressOnCreation: true
+      Ipv6CidrBlock:
+        Fn::Sub:
+          - "${VpcPart}${SubnetPart}"
+          - VpcPart: !Select [ 0, !Split [ '00::/56', !Select [ 0, !GetAtt MyVpc.Ipv6CidrBlocks ]]]
+            SubnetPart: '00::/64'
+      Tags:
+        - Key: Name
+          Value: public-subnet-demo
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  GatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref MyVpc
+      InternetGatewayId: !Ref InternetGateway
+
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVpc
+      Tags:
+        - Key: Name
+          Value: public-root-tbl
+
+  Route:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  IPv6Route:
+    Type: 'AWS::EC2::Route'
+    Properties:
+      RouteTableId: !Ref RouteTable
+      DestinationIpv6CidrBlock: '::/0'
+      GatewayId: !Ref InternetGateway
+
+  SubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref RouteTable
+
+  PublicSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow HTTP traffic
+      VpcId: !Ref MyVpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: !Ref SgCIDRBlock
+      Tags:
+        - Key: Name
+          Value: public-sg
+
+# セキュリティグループに IPv6 ルールを追加 (AWS 調達分)
+  PublicSecurityGroupIngressIPv6:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Properties:
+      GroupId: !Ref PublicSecurityGroup
+      IpProtocol: 'tcp'
+      FromPort: '80'
+      ToPort: '80'
+      CidrIpv6: !Ref SgIpv6CIDRBlock
