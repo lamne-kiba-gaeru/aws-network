@@ -1,6 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: Creates a VPC with IPv4 and IPv6 support, public and private subnets, and an internet gateway
 
+
 Parameters:
   AvailabilityZone1:
     Type: String

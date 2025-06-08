@@ -1,9 +1,8 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Creates a VPC with a public subnet and an internet gateway
+Description: Creates a VPC public and private subnets, and an internet gateway
 
 
 Parameters:
-
   AvailabilityZone1:
     Type: String
     Default: ap-northeast-1a  # ご自身の利用したいリージョンに合わせてください

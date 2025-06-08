@@ -13,13 +13,13 @@ provider "aws" {
 variable "availability_zone_1" {
   description = "The first availability zone."
   type        = string
-  default     = "us-east-1a"
+  default     = "ap-northeast-1a"
 }
 
 variable "availability_zone_2" {
   description = "The second availability zone."
   type        = string
-  default     = "us-east-1c"
+  default     = "ap-northeast-1c"
 }
 
 variable "instance_type" {
