@@ -1,0 +1,392 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Creates a VPC with IPv4 and IPv6 support, public and private subnets, and an internet gateway
+
+Parameters:
+  AvailabilityZone1:
+    Type: String
+    Default: ap-northeast-1a  # ご自身の利用したいリージョンに合わせてください
+    
+  AvailabilityZone2:
+    Type: String
+    Default: ap-northeast-1c  # ご自身の利用したいリージョンに合わせてください
+    
+  InstanceType:
+    Type: String
+    Default: t2.micro
+    
+  LatestAmiId:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64'
+
+  VPCCIDRBlock:
+    Type: String
+    Default: 10.0.0.0/24
+
+  PublicSubnetaCIDRBlock:
+    Type: String
+    Default: 10.0.0.0/27
+
+  PublicSubnetcCIDRBlock:
+    Type: String
+    Default: 10.0.0.32/27
+
+  PrivateSubnetaCIDRBlock:
+    Type: String
+    Default: 10.0.0.64/27
+
+  PrivateSubnetcCIDRBlock:
+    Type: String
+    Default: 10.0.0.96/27
+
+  SgCIDRBlock:
+    Type: String
+    Default: 10.1.2.0/27
+
+Resources:
+  MyVpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VPCCIDRBlock
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: vpc-demo
+
+  # IPv6 CIDRブロックをVPCに関連付け
+  Ipv6CidrBlock:
+    Type: AWS::EC2::VPCCidrBlock
+    Properties:
+      AmazonProvidedIpv6CidrBlock: true
+      VpcId: !Ref MyVpc
+
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    DependsOn: Ipv6CidrBlock
+    Properties:
+      VpcId: !Ref MyVpc
+      CidrBlock: !Ref PublicSubnetaCIDRBlock
+      AvailabilityZone: !Ref AvailabilityZone1
+      AssignIpv6AddressOnCreation: true
+      Ipv6CidrBlock:
+        Fn::Sub:
+          - "${VpcPart}${SubnetPart}"
+          - VpcPart: !Select [ 0, !Split [ '00::/56', !Select [ 0, !GetAtt MyVpc.Ipv6CidrBlocks ]]]
+            SubnetPart: '00::/64'
+      Tags:
+        - Key: Name
+          Value: public-subnet-a-demo
+
+  PublicSubnetC:
+    Type: AWS::EC2::Subnet
+    DependsOn: Ipv6CidrBlock
+    Properties:
+      VpcId: !Ref MyVpc
+      CidrBlock: !Ref PublicSubnetcCIDRBlock
+      AvailabilityZone: !Ref AvailabilityZone2
+      AssignIpv6AddressOnCreation: true
+      Ipv6CidrBlock:
+        Fn::Sub:
+          - "${VpcPart}${SubnetPart}"
+          - VpcPart: !Select [ 0, !Split [ '00::/56', !Select [ 0, !GetAtt MyVpc.Ipv6CidrBlocks ]]]
+            SubnetPart: '01::/64'
+      Tags:
+        - Key: Name
+          Value: public-subnet-c-demo
+
+  PrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    DependsOn: Ipv6CidrBlock
+    Properties:
+      VpcId: !Ref MyVpc
+      CidrBlock: !Ref PrivateSubnetaCIDRBlock
+      AvailabilityZone: !Ref AvailabilityZone1
+      AssignIpv6AddressOnCreation: true
+      Ipv6CidrBlock:
+        Fn::Sub:
+          - "${VpcPart}${SubnetPart}"
+          - VpcPart: !Select [ 0, !Split [ '00::/56', !Select [ 0, !GetAtt MyVpc.Ipv6CidrBlocks ]]]
+            SubnetPart: '02::/64'
+      Tags:
+        - Key: Name
+          Value: private-subnet-a-demo
+
+  PrivateSubnetC:
+    Type: AWS::EC2::Subnet
+    DependsOn: Ipv6CidrBlock
+    Properties:
+      VpcId: !Ref MyVpc
+      CidrBlock: !Ref PrivateSubnetcCIDRBlock
+      AvailabilityZone: !Ref AvailabilityZone2
+      AssignIpv6AddressOnCreation: true
+      Ipv6CidrBlock:
+        Fn::Sub:
+          - "${VpcPart}${SubnetPart}"
+          - VpcPart: !Select [ 0, !Split [ '00::/56', !Select [ 0, !GetAtt MyVpc.Ipv6CidrBlocks ]]]
+            SubnetPart: '03::/64'
+      Tags:
+        - Key: Name
+          Value: private-subnet-c-demo
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: igw-demo
+
+  GatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref MyVpc
+      InternetGatewayId: !Ref InternetGateway
+
+  # Egress-Only Internet Gateway for IPv6
+  EgressOnlyInternetGateway:
+    Type: AWS::EC2::EgressOnlyInternetGateway
+    Properties:
+      VpcId: !Ref MyVpc
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVpc
+      Tags:
+        - Key: Name
+          Value: public-root-tbl
+
+  # IPv4 パブリックルート
+  PublicRouteIPv4:
+    Type: AWS::EC2::Route
+    DependsOn: GatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  # IPv6 パブリックルート
+  PublicRouteIPv6:
+    Type: AWS::EC2::Route
+    DependsOn: GatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationIpv6CidrBlock: ::/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetA
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnetCRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetC
+      RouteTableId: !Ref PublicRouteTable
+      
+  # NATゲートウェイ用のElastic IP
+  NatGatewayEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      
+  # PublicSubnetAにNATゲートウェイを配置
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGatewayEIP.AllocationId
+      SubnetId: !Ref PublicSubnetA
+      Tags:
+        - Key: Name
+          Value: nat-gateway-demo
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVpc
+      Tags:
+        - Key: Name
+          Value: private-root-tbl
+          
+  # プライベートサブネットからNATゲートウェイへのルート (IPv4)
+  PrivateRouteIPv4:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  # プライベートサブネットからEgress-Only IGWへのルート (IPv6)
+  PrivateRouteIPv6:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationIpv6CidrBlock: ::/0
+      EgressOnlyInternetGatewayId: !Ref EgressOnlyInternetGateway
+
+  PrivateSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetA
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnetCRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetC
+      RouteTableId: !Ref PrivateRouteTable
+
+  PublicSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: 'public-sg'
+      GroupDescription: 'Allow HTTP traffic for IPv4 and IPv6'
+      VpcId: !Ref MyVpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: !Ref SgCIDRBlock
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIpv6: ::/0
+      Tags:
+        - Key: Name
+          Value: public-sg
+
+  PrivateSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: 'private-sg'
+      GroupDescription: 'Allow HTTP traffic from ALB'
+      VpcId: !Ref MyVpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !GetAtt ALBSecurityGroup.GroupId
+      Tags:
+        - Key: Name
+          Value: private-sg
+          
+  # ALB用のセキュリティグループ
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: 'alb-sg'
+      GroupDescription: 'Security group for ALB with IPv4 and IPv6 support'
+      VpcId: !Ref MyVpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIpv6: ::/0
+      Tags:
+        - Key: Name
+          Value: alb-sg
+
+  # EC2インスタンスA
+  EC2InstanceA:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !Ref LatestAmiId
+      SubnetId: !Ref PrivateSubnetA
+      SecurityGroupIds:
+        - !Ref PrivateSecurityGroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          sudo dnf install -y httpd
+          sudo echo "<h1>Hello from Private Subnet A (IPv4 & IPv6)</h1>" > /var/www/html/index.html
+          sudo systemctl start httpd
+          sudo systemctl enable httpd
+      Tags:
+        - Key: Name
+          Value: ec2-private-a
+          
+  # EC2インスタンスC
+  EC2InstanceC:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !Ref LatestAmiId
+      SubnetId: !Ref PrivateSubnetC
+      SecurityGroupIds:
+        - !Ref PrivateSecurityGroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          sudo dnf install -y httpd
+          sudo echo "<h1>Hello from Private Subnet C (IPv4 & IPv6)</h1>" > /var/www/html/index.html
+          sudo systemctl start httpd
+          sudo systemctl enable httpd
+      Tags:
+        - Key: Name
+          Value: ec2-private-c
+
+  # IPv6対応ALBの作成
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: demo-alb
+      Scheme: internet-facing
+      IpAddressType: dualstack
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      Subnets:
+        - !Ref PublicSubnetA
+        - !Ref PublicSubnetC
+      Tags:
+        - Key: Name
+          Value: demo-alb
+          
+  # ALBのターゲットグループ
+  ALBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: demo-tg
+      Port: 80
+      Protocol: HTTP
+      VpcId: !Ref MyVpc
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      TargetType: instance
+      IpAddressType: ipv4
+      Targets: 
+        - Id: !Ref EC2InstanceA
+          Port: 80
+        - Id: !Ref EC2InstanceC
+          Port: 80
+      Tags:
+        - Key: Name
+          Value: demo-tg
+          
+  # ALBリスナー
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref ALBTargetGroup
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+            
+Outputs:
+  LoadBalancerDNS:
+    Description: DNS Name of the Application Load Balancer
+    Value: !GetAtt ApplicationLoadBalancer.DNSName
+  VPCId:
+    Description: VPC ID
+    Value: !Ref MyVpc
+  VPCIPv6CidrBlock:
+    Description: IPv6 CIDR Block assigned to the VPC
+    Value: !Select [ 0, !GetAtt MyVpc.Ipv6CidrBlocks ]
+    
