@@ -1,7 +1,7 @@
 ## 001-aws-network
 	- 内容：VPC-パブリックサブネットの構成です。
 	  EC2などコンピューティングサービスは含まれていません。
-	- ネットワーク解説：[AWS VPCネットワーク-パブリック構成](https://qiita.com/lamune-kiba-gaeru/items/1eda2ec71d2b872ab8a2)
+	- ネットワーク解説：https://qiita.com/lamune-kiba-gaeru/items/1eda2ec71d2b872ab8a2
 
 ## 002-aws-network
 	- 内容：VPC-パブリック-プライベートサブネットの構成です。
