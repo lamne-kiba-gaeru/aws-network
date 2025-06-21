@@ -1,0 +1,268 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Main template that creates multi-AZ and single-AZ VPC configurations with IPv6 support
+
+Parameters:
+  # テンプレート格納先のURL
+  TemplateUrl:
+    Type: String
+    Description: TemplateURL:https://{buketname}.s3.{region}.amazonaws.com/{prefix}/
+    
+  S3BucketName:
+    Type: String
+    Description: Name of the S3 bucket to create
+
+Resources:
+  # S3バケットの作成
+  DemoS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${S3BucketName}-${AWS::AccountId}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Name
+          Value: demo-vpc-endpoint-bucket
+
+  # 既存のマルチAZ VPC構成
+  MultiAZVpcStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Join 
+        - ''
+        - - !Ref TemplateUrl
+          - 'multi-az-vpc.yaml'
+      Parameters:
+        AvailabilityZone1: ap-northeast-1a
+        AvailabilityZone2: ap-northeast-1c
+        VPCCIDRBlock: 10.0.0.0/24
+        PublicSubnetaCIDRBlock: 10.0.0.0/27
+        PublicSubnetcCIDRBlock: 10.0.0.32/27
+        PrivateSubnetaCIDRBlock: 10.0.0.64/27
+        PrivateSubnetcCIDRBlock: 10.0.0.96/27
+      Tags:
+        - Key: Name
+          Value: multi-az-vpc-stack
+
+  # 新しいシングルAZ VPC構成
+  SingleAZVpcStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Join 
+        - ''
+        - - !Ref TemplateUrl
+          - 'single-az-vpc.yaml'
+      Parameters:
+        AvailabilityZone: ap-northeast-1a
+        VPCCIDRBlock: 10.1.0.0/24
+        PublicSubnetCIDRBlock: 10.1.0.0/27
+        PrivateSubnetCIDRBlock: 10.1.0.32/27
+      Tags:
+        - Key: Name
+          Value: single-az-vpc-stack
+          
+  # S3用のVPCエンドポイント
+  S3VpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    DependsOn: MultiAZVpcStack
+    Properties:
+      VpcId: !GetAtt MultiAZVpcStack.Outputs.VpcId
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.s3
+      VpcEndpointType: Gateway
+      RouteTableIds:
+        - !GetAtt MultiAZVpcStack.Outputs.PrivateRouteTableId
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action:
+              - 's3:GetObject'
+              - 's3:ListBucket'
+              - 's3:PutObject'
+            Resource:
+              - !Sub 'arn:aws:s3:::${S3BucketName}-${AWS::AccountId}'
+              - !Sub 'arn:aws:s3:::${S3BucketName}-${AWS::AccountId}/*'
+              
+  # SSM用のVPCエンドポイント
+  SSMVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    DependsOn: MultiAZVpcStack
+    Properties:
+      VpcId: !GetAtt MultiAZVpcStack.Outputs.VpcId
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ssm
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !GetAtt MultiAZVpcStack.Outputs.PrivateSubnetAId
+        - !GetAtt MultiAZVpcStack.Outputs.PrivateSubnetCId
+      SecurityGroupIds:
+        - !Ref SSMSecurityGroup
+        
+  # EC2Messages用のVPCエンドポイント
+  EC2MessagesVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    DependsOn: MultiAZVpcStack
+    Properties:
+      VpcId: !GetAtt MultiAZVpcStack.Outputs.VpcId
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ec2messages
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !GetAtt MultiAZVpcStack.Outputs.PrivateSubnetAId
+        - !GetAtt MultiAZVpcStack.Outputs.PrivateSubnetCId
+      SecurityGroupIds:
+        - !Ref SSMSecurityGroup
+        
+  # SSMMessages用のVPCエンドポイント
+  SSMMessagesVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    DependsOn: MultiAZVpcStack
+    Properties:
+      VpcId: !GetAtt MultiAZVpcStack.Outputs.VpcId
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ssmmessages
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !GetAtt MultiAZVpcStack.Outputs.PrivateSubnetAId
+        - !GetAtt MultiAZVpcStack.Outputs.PrivateSubnetCId
+      SecurityGroupIds:
+        - !Ref SSMSecurityGroup
+        
+  # SSM用のセキュリティグループ
+  SSMSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DependsOn: MultiAZVpcStack
+    Properties:
+      GroupDescription: Security group for SSM VPC Endpoints
+      VpcId: !GetAtt MultiAZVpcStack.Outputs.VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !GetAtt MultiAZVpcStack.Outputs.VpcCidr
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIpv6: !GetAtt MultiAZVpcStack.Outputs.VpcIpv6Cidr
+      Tags:
+        - Key: Name
+          Value: ssm-endpoint-sg
+              
+  # VPCピアリング接続
+  VpcPeeringConnection:
+    Type: AWS::EC2::VPCPeeringConnection
+    DependsOn: [MultiAZVpcStack, SingleAZVpcStack]
+    Properties:
+      VpcId: !GetAtt MultiAZVpcStack.Outputs.VpcId
+      PeerVpcId: !GetAtt SingleAZVpcStack.Outputs.SingleAZVpcId
+      Tags:
+        - Key: Name
+          Value: multi-az-to-single-az-peering
+          
+  # MultiAZ VPCからSingleAZ VPCへのIPv4ルート
+  MultiAzToSingleAzRouteIpv4:
+    Type: AWS::EC2::Route
+    DependsOn: VpcPeeringConnection
+    Properties:
+      RouteTableId: !GetAtt MultiAZVpcStack.Outputs.PrivateRouteTableId
+      DestinationCidrBlock: 10.1.0.0/24
+      VpcPeeringConnectionId: !Ref VpcPeeringConnection
+      
+  # MultiAZ VPCからSingleAZ VPCへのIPv6ルート
+  MultiAzToSingleAzRouteIpv6:
+    Type: AWS::EC2::Route
+    DependsOn: VpcPeeringConnection
+    Properties:
+      RouteTableId: !GetAtt MultiAZVpcStack.Outputs.PrivateRouteTableId
+      DestinationIpv6CidrBlock: !GetAtt SingleAZVpcStack.Outputs.VpcIpv6Cidr
+      VpcPeeringConnectionId: !Ref VpcPeeringConnection
+      
+  # SingleAZ VPCからMultiAZ VPCへのIPv4ルート
+  SingleAzToMultiAzRouteIpv4:
+    Type: AWS::EC2::Route
+    DependsOn: VpcPeeringConnection
+    Properties:
+      RouteTableId: !GetAtt SingleAZVpcStack.Outputs.PrivateRouteTableId
+      DestinationCidrBlock: 10.0.0.0/24
+      VpcPeeringConnectionId: !Ref VpcPeeringConnection
+      
+  # SingleAZ VPCからMultiAZ VPCへのIPv6ルート
+  SingleAzToMultiAzRouteIpv6:
+    Type: AWS::EC2::Route
+    DependsOn: VpcPeeringConnection
+    Properties:
+      RouteTableId: !GetAtt SingleAZVpcStack.Outputs.PrivateRouteTableId
+      DestinationIpv6CidrBlock: !GetAtt MultiAZVpcStack.Outputs.VpcIpv6Cidr
+      VpcPeeringConnectionId: !Ref VpcPeeringConnection
+      
+  # SingleAZ VPCのセキュリティグループ
+  SingleAzSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DependsOn: SingleAZVpcStack
+    Properties:
+      GroupDescription: Allow HTTP from MultiAZ VPC
+      VpcId: !GetAtt SingleAZVpcStack.Outputs.SingleAZVpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 10.0.0.0/24
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIpv6: !GetAtt MultiAZVpcStack.Outputs.VpcIpv6Cidr
+      Tags:
+        - Key: Name
+          Value: single-az-sg
+
+Outputs:
+  MultiAZLoadBalancerDNS:
+    Description: DNS Name of the Application Load Balancer in Multi-AZ VPC
+    Value: !GetAtt MultiAZVpcStack.Outputs.LoadBalancerDNS
+
+  SingleAZVpcId:
+    Description: ID of the Single AZ VPC
+    Value: !GetAtt SingleAZVpcStack.Outputs.SingleAZVpcId
+
+  SingleAZPublicSubnetId:
+    Description: ID of the public subnet in Single AZ VPC
+    Value: !GetAtt SingleAZVpcStack.Outputs.PublicSubnetId
+
+  SingleAZPrivateSubnetId:
+    Description: ID of the private subnet in Single AZ VPC
+    Value: !GetAtt SingleAZVpcStack.Outputs.PrivateSubnetId
+    
+  S3BucketName:
+    Description: Name of the S3 bucket
+    Value: !Sub "${S3BucketName}-${AWS::AccountId}"
+    
+  VpcPeeringConnectionId:
+    Description: ID of the VPC Peering Connection
+    Value: !Ref VpcPeeringConnection
+    
+  S3VpcEndpointId:
+    Description: ID of the S3 VPC Endpoint
+    Value: !Ref S3VpcEndpoint
+    
+  SSMVpcEndpointId:
+    Description: ID of the SSM VPC Endpoint
+    Value: !Ref SSMVpcEndpoint
+    
+  EC2MessagesVpcEndpointId:
+    Description: ID of the EC2Messages VPC Endpoint
+    Value: !Ref EC2MessagesVpcEndpoint
+    
+  SSMMessagesVpcEndpointId:
+    Description: ID of the SSMMessages VPC Endpoint
+    Value: !Ref SSMMessagesVpcEndpoint
+    
+  MultiAZVpcIpv6Cidr:
+    Description: IPv6 CIDR Block of the Multi-AZ VPC
+    Value: !GetAtt MultiAZVpcStack.Outputs.VpcIpv6Cidr
+    
+  SingleAZVpcIpv6Cidr:
+    Description: IPv6 CIDR Block of the Single AZ VPC
+    Value: !GetAtt SingleAZVpcStack.Outputs.VpcIpv6Cidr
